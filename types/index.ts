@@ -89,12 +89,22 @@ export interface ChatMessage {
   timestamp: number;
 }
 
+/** 퀴즈 판정 결과 */
+export interface QuizResult {
+  correct: boolean;
+  passed: boolean;       // 정답 OR 3회 오답으로 강제 통과
+  revealed: boolean;     // 3회 오답으로 정답 공개 여부
+  step: number;
+  quizProgress: number;  // 업데이트된 quiz_progress
+}
+
 /** 채팅 API 응답 */
 export interface ChatApiResponse {
   message: string;
   quizStep: number | null;
   quizQuestion: string | null;
   isQuizMode: boolean;
+  quizResult?: QuizResult; // 퀴즈 답변 판정 결과 (답변 시에만 포함)
 }
 
 /** HMAC 서명 토큰 페이로드 */

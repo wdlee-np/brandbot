@@ -4,7 +4,8 @@ import { createAdminClient } from '@/lib/supabase/admin';
 import { buildSystemPrompt, generateWithContext } from '@/services/gemini/cache';
 import { DEFAULT_MODEL } from '@/services/gemini/client';
 import { checkRateLimit } from '@/services/rateLimit';
-import type { ChatMessage, ChatApiResponse, Project } from '@/types';
+import { judgeAnswer } from '@/services/quiz/judge';
+import type { ChatMessage, ChatApiResponse, Project, QuizResult } from '@/types';
 
 const MAX_HISTORY_TURNS = 20;
 
@@ -23,14 +24,30 @@ export async function POST(
 ) {
   const { projectId } = await params;
 
-  let body: { token: string; message: string; conversationHistory?: ChatMessage[]; askedQuizSteps?: number[] };
+  let body: {
+    token: string;
+    message: string;
+    conversationHistory?: ChatMessage[];
+    passedQuizSteps?: number[];           // BUG-08-07: 클라이언트 localStorage 통과 단계
+    quizAnswerContext?: {                  // BUG-08-04: 퀴즈 답변 판정 컨텍스트
+      step: number;
+      wrongAttempts: number;
+    };
+  };
   try {
     body = await request.json();
   } catch {
     return NextResponse.json({ error: '잘못된 요청 형식입니다.' }, { status: 400 });
   }
 
-  const { token, message, conversationHistory = [], askedQuizSteps = [] } = body;
+  const {
+    token,
+    message,
+    conversationHistory = [],
+    passedQuizSteps = [],
+    quizAnswerContext,
+  } = body;
+
   if (!token || !message) {
     return NextResponse.json({ error: 'token과 message는 필수입니다.' }, { status: 400 });
   }
@@ -81,11 +98,15 @@ export async function POST(
     .eq('project_id', projectId)
     .single();
 
-  const quizProgress = participant?.quiz_progress ?? 0;
+  const dbQuizProgress = participant?.quiz_progress ?? 0;
 
-  // 현재 퀴즈 조회 (다음 출제할 퀴즈)
-  const nextStep = quizProgress + 1;
-  let currentQuiz = null;
+  // BUG-08-07: 클라이언트 localStorage 통과 기록과 DB 중 큰 값 사용
+  const localProgress = passedQuizSteps.length;
+  const effectiveProgress = Math.max(dbQuizProgress, localProgress);
+  const nextStep = effectiveProgress + 1;
+
+  // 다음 출제할 퀴즈 조회
+  let currentQuiz: { id: string; step: number; question: string; answer: string } | null = null;
   if (nextStep <= 3) {
     const { data: quiz } = await supabase
       .from('quizzes')
@@ -99,14 +120,103 @@ export async function POST(
   // 대화 히스토리 제한 (최대 20턴)
   const limitedHistory = conversationHistory.slice(-MAX_HISTORY_TURNS);
 
-  // BUG-07-01: 이미 출제된 단계는 퀴즈 문제를 context에서 제외 (반복 출제 방지)
-  const quizAlreadyAsked = nextStep <= 3 && askedQuizSteps.includes(nextStep);
-  const quizContextSuffix =
-    nextStep <= 3 && currentQuiz && !quizAlreadyAsked
-      ? `, 퀴즈 문제: ${currentQuiz.question}`
-      : '';
+  // =====================================================================
+  // BUG-08-04/05: 퀴즈 답변 판정 로직
+  // =====================================================================
+  let quizResult: QuizResult | undefined;
+  let quizInstruction = '';
+  let isAnsweringQuiz = false;
 
-  // 퀴즈 단계 컨텍스트를 마지막 user 메시지에 포함
+  if (quizAnswerContext) {
+    isAnsweringQuiz = true;
+    const { step: answerStep, wrongAttempts } = quizAnswerContext;
+
+    // 해당 단계 퀴즈 조회 (답변 판정용)
+    const { data: targetQuiz } = await supabase
+      .from('quizzes')
+      .select('*')
+      .eq('project_id', projectId)
+      .eq('step', answerStep)
+      .single();
+
+    if (targetQuiz) {
+      const isCorrect = judgeAnswer(message, targetQuiz.answer);
+
+      if (isCorrect) {
+        // 정답: DB quiz_progress 업데이트
+        const newProgress = Math.max(dbQuizProgress, answerStep);
+        await supabase
+          .from('participants')
+          .update({ quiz_progress: newProgress })
+          .eq('user_token_hash', tokenHash)
+          .eq('project_id', projectId);
+
+        quizInstruction = `[퀴즈_판정: ${answerStep}단계 정답! 정답을 맞혔음을 축하해주세요. 격려 메시지로 마무리. [QUIZ_STEP] 마커 사용 금지.]`;
+        quizResult = {
+          correct: true,
+          passed: true,
+          revealed: false,
+          step: answerStep,
+          quizProgress: newProgress,
+        };
+      } else if (wrongAttempts === 0) {
+        // 1회 오답: 첫 번째 힌트
+        quizInstruction = `[퀴즈_판정: ${answerStep}단계 오답 (1회째). 틀렸음을 알리고 첫 번째 힌트를 제공하세요. 힌트 제공 시 정답 단어("${targetQuiz.answer}")와 동일하거나 포함하는 표현 절대 사용 금지. 간접적인 힌트(속성, 특징, 연상 단어)만 사용. [QUIZ_STEP] 마커 사용 금지.]`;
+        quizResult = {
+          correct: false,
+          passed: false,
+          revealed: false,
+          step: answerStep,
+          quizProgress: dbQuizProgress,
+        };
+      } else if (wrongAttempts === 1) {
+        // 2회 오답: 두 번째 힌트
+        quizInstruction = `[퀴즈_판정: ${answerStep}단계 오답 (2회째). 틀렸음을 알리고 두 번째 힌트를 제공하세요 (첫 번째 힌트보다 더 구체적으로). 힌트 제공 시 정답 단어("${targetQuiz.answer}")와 동일하거나 포함하는 표현 절대 사용 금지. 간접적인 힌트만 사용. [QUIZ_STEP] 마커 사용 금지.]`;
+        quizResult = {
+          correct: false,
+          passed: false,
+          revealed: false,
+          step: answerStep,
+          quizProgress: dbQuizProgress,
+        };
+      } else {
+        // 3회 이상 오답: 강제 통과 + 정답 공개
+        const newProgress = Math.max(dbQuizProgress, answerStep);
+        await supabase
+          .from('participants')
+          .update({ quiz_progress: newProgress })
+          .eq('user_token_hash', tokenHash)
+          .eq('project_id', projectId);
+
+        quizInstruction = `[퀴즈_판정: ${answerStep}단계 오답 (3회째). 안타깝게도 정답을 맞히지 못했음을 알리고, 정답은 "${targetQuiz.answer}"임을 알려주세요. 격려 메시지로 마무리. [QUIZ_STEP] 마커 사용 금지.]`;
+        quizResult = {
+          correct: false,
+          passed: true,
+          revealed: true,
+          step: answerStep,
+          quizProgress: newProgress,
+        };
+      }
+    }
+  }
+
+  // =====================================================================
+  // AI 메시지 컨텍스트 구성
+  // =====================================================================
+  let userMessageText: string;
+
+  if (isAnsweringQuiz && quizInstruction) {
+    // 퀴즈 답변 판정 모드: 판정 지시어 포함, 퀴즈 문제 suffix 제외
+    userMessageText = `${quizInstruction}\n\n사용자 답변: ${message}`;
+  } else {
+    // 일반 대화 또는 새 퀴즈 출제 모드
+    const quizContextSuffix =
+      nextStep <= 3 && currentQuiz
+        ? `, 퀴즈 문제: "${currentQuiz.question}"`
+        : '';
+    userMessageText = `[현재 퀴즈 단계: ${nextStep <= 3 ? nextStep : '완료'} / 3${quizContextSuffix}]\n\n${message}`;
+  }
+
   const contents = [
     ...limitedHistory.map((msg) => ({
       role: msg.role as 'user' | 'model',
@@ -114,11 +224,7 @@ export async function POST(
     })),
     {
       role: 'user' as const,
-      parts: [
-        {
-          text: `[현재 퀴즈 단계: ${nextStep <= 3 ? nextStep : '완료'} / 3${quizContextSuffix}]\n\n${message}`,
-        },
-      ],
+      parts: [{ text: userMessageText }],
     },
   ];
 
@@ -132,11 +238,18 @@ export async function POST(
 
     const { cleanText, quizStep } = extractQuizStep(rawText);
 
+    // BUG-08-02: AI가 QUIZ_STEP 마커를 붙였지만 DB 퀴즈 문제가 응답에 없으면 강제 추가
+    let finalText = cleanText;
+    if (quizStep !== null && currentQuiz && !cleanText.includes(currentQuiz.question)) {
+      finalText = `${cleanText}\n\n${currentQuiz.question}`;
+    }
+
     const response: ChatApiResponse = {
-      message: cleanText,
-      quizStep: quizStep,
-      quizQuestion: quizStep !== null ? (currentQuiz?.question ?? null) : null,
-      isQuizMode: quizStep !== null,
+      message: finalText,
+      quizStep: quizResult ? null : quizStep,       // 판정 모드에서는 quizStep 전달 안 함
+      quizQuestion: (!quizResult && quizStep !== null) ? (currentQuiz?.question ?? null) : null,
+      isQuizMode: quizResult ? false : quizStep !== null,
+      ...(quizResult ? { quizResult } : {}),
     };
 
     return NextResponse.json(response);
