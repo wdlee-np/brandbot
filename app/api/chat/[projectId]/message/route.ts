@@ -100,14 +100,17 @@ export async function POST(
 
   const dbQuizProgress = participant?.quiz_progress ?? 0;
 
-  // BUG-08-07: 클라이언트 localStorage 통과 기록과 DB 중 큰 값 사용
-  const localProgress = passedQuizSteps.length;
-  const effectiveProgress = Math.max(dbQuizProgress, localProgress);
-  const nextStep = effectiveProgress + 1;
+  // BUG-09-02: 집합 기반으로 통과하지 않은 첫 번째 단계 탐색
+  // (passedQuizSteps가 [1,3]처럼 불연속일 수 있으므로 단순 length 사용 불가)
+  const allPassedStepsSet = new Set<number>([
+    ...Array.from({ length: dbQuizProgress }, (_, i) => i + 1),
+    ...passedQuizSteps,
+  ]);
+  const nextStep: number | null = ([1, 2, 3] as const).find((s) => !allPassedStepsSet.has(s)) ?? null;
 
   // 다음 출제할 퀴즈 조회
   let currentQuiz: { id: string; step: number; question: string; answer: string } | null = null;
-  if (nextStep <= 3) {
+  if (nextStep !== null) {
     const { data: quiz } = await supabase
       .from('quizzes')
       .select('*')
@@ -151,7 +154,7 @@ export async function POST(
           .eq('user_token_hash', tokenHash)
           .eq('project_id', projectId);
 
-        quizInstruction = `[퀴즈_판정: ${answerStep}단계 정답! 정답을 맞혔음을 축하해주세요. 격려 메시지로 마무리. [QUIZ_STEP] 마커 사용 금지.]`;
+        quizInstruction = `[퀴즈_판정: ${answerStep}단계 정답! 정답을 맞혔음을 축하해주세요. 격려 메시지로 마무리. 절대로 다음 퀴즈를 출제하거나 퀴즈 문제를 언급하지 마세요. [QUIZ_STEP] 마커 사용 금지.]`;
         quizResult = {
           correct: true,
           passed: true,
@@ -188,7 +191,7 @@ export async function POST(
           .eq('user_token_hash', tokenHash)
           .eq('project_id', projectId);
 
-        quizInstruction = `[퀴즈_판정: ${answerStep}단계 오답 (3회째). 안타깝게도 정답을 맞히지 못했음을 알리고, 정답은 "${targetQuiz.answer}"임을 알려주세요. 격려 메시지로 마무리. [QUIZ_STEP] 마커 사용 금지.]`;
+        quizInstruction = `[퀴즈_판정: ${answerStep}단계 오답 (3회째). 안타깝게도 정답을 맞히지 못했음을 알리고, 정답은 "${targetQuiz.answer}"임을 알려주세요. 격려 메시지로 마무리. 절대로 다음 퀴즈를 출제하거나 퀴즈 문제를 언급하지 마세요. [QUIZ_STEP] 마커 사용 금지.]`;
         quizResult = {
           correct: false,
           passed: true,
@@ -211,10 +214,10 @@ export async function POST(
   } else {
     // 일반 대화 또는 새 퀴즈 출제 모드
     const quizContextSuffix =
-      nextStep <= 3 && currentQuiz
+      nextStep !== null && currentQuiz
         ? `, 퀴즈 문제: "${currentQuiz.question}"`
         : '';
-    userMessageText = `[현재 퀴즈 단계: ${nextStep <= 3 ? nextStep : '완료'} / 3${quizContextSuffix}]\n\n${message}`;
+    userMessageText = `[현재 퀴즈 단계: ${nextStep !== null ? nextStep : '완료'} / 3${quizContextSuffix}]\n\n${message}`;
   }
 
   const contents = [
@@ -238,9 +241,10 @@ export async function POST(
 
     const { cleanText, quizStep } = extractQuizStep(rawText);
 
-    // BUG-08-02: AI가 QUIZ_STEP 마커를 붙였지만 DB 퀴즈 문제가 응답에 없으면 강제 추가
+    // BUG-08-02 / BUG-09-01: AI가 QUIZ_STEP 마커를 붙였지만 DB 퀴즈 문제가 응답에 없으면 강제 추가
+    // quizAnswerContext 모드(정답/오답 판정 중)에서는 후처리 건너뜀 — 두 퀴즈 문제 중복 방지
     let finalText = cleanText;
-    if (quizStep !== null && currentQuiz && !cleanText.includes(currentQuiz.question)) {
+    if (!quizAnswerContext && quizStep !== null && currentQuiz && !cleanText.includes(currentQuiz.question)) {
       finalText = `${cleanText}\n\n${currentQuiz.question}`;
     }
 
