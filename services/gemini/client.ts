@@ -73,9 +73,10 @@ export async function generateWithFallback(
     return await generateContent(modelId, request);
   } catch (err: unknown) {
     const status = (err as { status?: number })?.status;
-    if (modelId === DEFAULT_MODEL && (status === undefined || status >= 500 || status === 429)) {
-      console.warn(`[Gemini] ${modelId} 오류(${status}), fallback: gemini-2.5-flash`);
-      return await generateContent('gemini-2.5-flash', request);
+    // BUG-10-02: fallback을 DEFAULT_MODEL로 변경 (gemini-2.5-flash 하드코딩 제거)
+    if (modelId !== DEFAULT_MODEL && (status === undefined || status >= 500 || status === 429)) {
+      console.warn(`[Gemini] ${modelId} 오류(${status}), fallback: ${DEFAULT_MODEL}`);
+      return await generateContent(DEFAULT_MODEL, request);
     }
     throw err;
   }

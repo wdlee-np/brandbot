@@ -4,13 +4,13 @@
 
 export type GeminiModel =
   | 'gemini-3.1-flash-lite-preview'
-  | 'gemini-2.5-flash'
+  | 'gemini-3.1-flash-preview'
   | 'gemini-3.1-pro-preview';
 
 export const GEMINI_MODEL_OPTIONS: { value: GeminiModel; label: string }[] = [
-  { value: 'gemini-3.1-flash-lite-preview', label: 'Flash Lite (최고 가성비)' },
-  { value: 'gemini-2.5-flash', label: 'Flash 2.5 (표준 성능)' },
-  { value: 'gemini-3.1-pro-preview', label: 'Pro (고성능 추론)' },
+  { value: 'gemini-3.1-flash-lite-preview', label: 'gemini-3.1-flash-lite-preview (최고 가성비)' },
+  { value: 'gemini-3.1-flash-preview', label: 'gemini-3.1-flash-preview (표준 성능)' },
+  { value: 'gemini-3.1-pro-preview', label: 'gemini-3.1-pro-preview (고성능 추론)' },
 ];
 
 /** 브랜드 프로젝트 */
@@ -31,13 +31,13 @@ export interface Project {
   updated_at: string;
 }
 
-/** 퀴즈 (프로젝트당 3개) */
+/** 퀴즈 (프로젝트당 최대 5개) */
 export interface Quiz {
   id: string;
   project_id: string;
-  step: 1 | 2 | 3;
+  step: 1 | 2 | 3 | 4 | 5;
   question: string;
-  answer: string; // 10자 이내
+  answer: string; // 20자 이내
   created_at: string;
 }
 
@@ -48,7 +48,7 @@ export interface Participant {
   project_id: string;
   device_fingerprint: string | null;
   ip_hash: string | null;
-  quiz_progress: 0 | 1 | 2 | 3;
+  quiz_progress: 0 | 1 | 2 | 3 | 4 | 5;
   coupon_issued_at: string | null;
   created_at: string;
 }
@@ -104,6 +104,7 @@ export interface ChatApiResponse {
   quizStep: number | null;
   quizQuestion: string | null;
   isQuizMode: boolean;
+  quizTotal: number;         // 프로젝트의 총 퀴즈 수
   quizResult?: QuizResult; // 퀴즈 답변 판정 결과 (답변 시에만 포함)
 }
 

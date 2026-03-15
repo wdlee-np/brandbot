@@ -315,11 +315,12 @@ export default function ProjectDetailClient({ project: initial, quizzes: initial
 
       {/* 액션 */}
       <div className="flex flex-wrap gap-3">
-        {project.status === 'ready' && (
+        {/* BUG-10-01: inactive 포함, BUG-10-04: 1개 이상이면 활성화 가능 */}
+        {['ready', 'inactive'].includes(project.status) && (
           <Button
             onClick={() => handleStatusChange('active')}
-            disabled={currentQuizzes.length < 3}
-            title={currentQuizzes.length < 3 ? '퀴즈 3개가 필요합니다' : undefined}
+            disabled={currentQuizzes.length < 1}
+            title={currentQuizzes.length < 1 ? '퀴즈 1개 이상이 필요합니다' : undefined}
           >
             활성화
           </Button>

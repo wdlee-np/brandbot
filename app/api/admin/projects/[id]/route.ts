@@ -68,12 +68,12 @@ export async function PATCH(
     return NextResponse.json({ error: '잘못된 요청 형식입니다.' }, { status: 400 });
   }
 
-  // active → inactive 또는 inactive → active 상태 전환 처리
+  // BUG-10-01: inactive/ready → active 상태 전환 처리
   if (body.status === 'active') {
-    // 활성화 조건: status='ready' + quizzes >= 3
-    if (project.status !== 'ready') {
+    // BUG-10-01: inactive 포함, BUG-10-04: 1개 이상이면 활성화 가능
+    if (!['ready', 'inactive'].includes(project.status)) {
       return NextResponse.json(
-        { error: '파일이 업로드된 ready 상태에서만 활성화할 수 있습니다.' },
+        { error: '파일이 업로드된 ready 또는 inactive 상태에서만 활성화할 수 있습니다.' },
         { status: 400 }
       );
     }
@@ -82,9 +82,9 @@ export async function PATCH(
       .select('id', { count: 'exact', head: true })
       .eq('project_id', id);
 
-    if ((count ?? 0) < 3) {
+    if ((count ?? 0) < 1) {
       return NextResponse.json(
-        { error: '퀴즈가 3개 이상 등록되어야 활성화할 수 있습니다.' },
+        { error: '퀴즈가 1개 이상 등록되어야 활성화할 수 있습니다.' },
         { status: 400 }
       );
     }

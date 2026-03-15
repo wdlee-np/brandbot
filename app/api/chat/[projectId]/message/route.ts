@@ -100,25 +100,28 @@ export async function POST(
 
   const dbQuizProgress = participant?.quiz_progress ?? 0;
 
+  // BUG-10-04: 실제 프로젝트 퀴즈 목록 기반으로 nextStep 계산 (동적 퀴즈 수 지원)
+  const { data: projectQuizzes } = await supabase
+    .from('quizzes')
+    .select('id, step, question, answer')
+    .eq('project_id', projectId)
+    .order('step');
+
+  const projectQuizList = projectQuizzes ?? [];
+  const projectSteps = projectQuizList.map((q) => q.step as number);
+  const quizTotal = projectSteps.length;
+
   // BUG-09-02: 집합 기반으로 통과하지 않은 첫 번째 단계 탐색
-  // (passedQuizSteps가 [1,3]처럼 불연속일 수 있으므로 단순 length 사용 불가)
   const allPassedStepsSet = new Set<number>([
     ...Array.from({ length: dbQuizProgress }, (_, i) => i + 1),
     ...passedQuizSteps,
   ]);
-  const nextStep: number | null = ([1, 2, 3] as const).find((s) => !allPassedStepsSet.has(s)) ?? null;
+  const nextStep: number | null = projectSteps.find((s) => !allPassedStepsSet.has(s)) ?? null;
 
-  // 다음 출제할 퀴즈 조회
-  let currentQuiz: { id: string; step: number; question: string; answer: string } | null = null;
-  if (nextStep !== null) {
-    const { data: quiz } = await supabase
-      .from('quizzes')
-      .select('*')
-      .eq('project_id', projectId)
-      .eq('step', nextStep)
-      .single();
-    currentQuiz = quiz;
-  }
+  // 다음 출제할 퀴즈 조회 (이미 projectQuizList에서 가져옴)
+  const currentQuiz = nextStep !== null
+    ? (projectQuizList.find((q) => q.step === nextStep) ?? null)
+    : null;
 
   // 대화 히스토리 제한 (최대 20턴)
   const limitedHistory = conversationHistory.slice(-MAX_HISTORY_TURNS);
@@ -253,6 +256,7 @@ export async function POST(
       quizStep: quizResult ? null : quizStep,       // 판정 모드에서는 quizStep 전달 안 함
       quizQuestion: (!quizResult && quizStep !== null) ? (currentQuiz?.question ?? null) : null,
       isQuizMode: quizResult ? false : quizStep !== null,
+      quizTotal,                                    // BUG-10-04: 프로젝트 총 퀴즈 수
       ...(quizResult ? { quizResult } : {}),
     };
 

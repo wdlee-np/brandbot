@@ -48,9 +48,9 @@ export async function generateQuizzes(project: Project): Promise<Omit<Quiz, 'id'
   }
 
   return quizzes.slice(0, 3).map((q, i) => {
-    const answer = q.answer?.slice(0, 10) ?? '';
-    if (q.answer && q.answer.length > 10) {
-      console.warn(`[Quiz] step ${i + 1} answer 10자 초과, 슬라이싱: "${q.answer}" → "${answer}"`);
+    const answer = q.answer?.slice(0, 20) ?? '';
+    if (q.answer && q.answer.length > 20) {
+      console.warn(`[Quiz] step ${i + 1} answer 20자 초과, 슬라이싱: "${q.answer}" → "${answer}"`);
     }
     return {
       project_id: project.id,

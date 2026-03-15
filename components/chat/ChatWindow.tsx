@@ -16,7 +16,7 @@ interface Props {
   onQuizComplete?: () => void;
 }
 
-// 상단 퀴즈 진행 표시
+// 상단 퀴즈 진행 표시 (BUG-10-04: total을 동적으로)
 function QuizProgress({ current, total = 3 }: { current: number; total?: number }) {
   return (
     <div className="flex items-center gap-2 px-4 py-2 border-b bg-amber-50 dark:bg-amber-950">
@@ -48,6 +48,7 @@ export default function ChatWindow({ projectId, token, brandName, initialQuizPro
     isLoading,
     isQuizMode,
     quizProgress,
+    quizTotal,  // BUG-10-04: 동적 퀴즈 수
     errorCode,
     sendMessage,
   } = useChat({
@@ -87,12 +88,12 @@ export default function ChatWindow({ projectId, token, brandName, initialQuizPro
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, isQuizMode]);
 
-  // 퀴즈 3단계 완료 감지
+  // 퀴즈 완료 감지 (BUG-10-04: 동적 quizTotal 기준)
   useEffect(() => {
-    if (quizProgress >= 3) {
+    if (quizTotal > 0 && quizProgress >= quizTotal) {
       onQuizComplete?.();
     }
-  }, [quizProgress, onQuizComplete]);
+  }, [quizProgress, quizTotal, onQuizComplete]);
 
   // 401 — 토큰 만료 시 차단 페이지로 이동
   useEffect(() => {
@@ -118,8 +119,8 @@ export default function ChatWindow({ projectId, token, brandName, initialQuizPro
         </div>
       </div>
 
-      {/* 퀴즈 진행 표시 */}
-      {quizProgress > 0 && <QuizProgress current={quizProgress} />}
+      {/* 퀴즈 진행 표시 — BUG-10-04: quizTotal 동적 전달 */}
+      {quizProgress > 0 && <QuizProgress current={quizProgress} total={quizTotal} />}
 
       {/* 메시지 목록 */}
       <div className="flex-1 overflow-y-auto py-4 space-y-3">
@@ -169,10 +170,11 @@ export default function ChatWindow({ projectId, token, brandName, initialQuizPro
       </div>
 
       {/* 입력창 */}
+      {/* BUG-10-04: quizTotal 기준 완료 판정 */}
       <ChatInput
         onSend={sendMessage}
-        disabled={isLoading || quizProgress >= 3}
-        placeholder={quizProgress >= 3 ? '퀴즈 완료! 쿠폰을 확인하세요.' : '메시지를 입력하세요...'}
+        disabled={isLoading || (quizTotal > 0 && quizProgress >= quizTotal)}
+        placeholder={(quizTotal > 0 && quizProgress >= quizTotal) ? '퀴즈 완료! 쿠폰을 확인하세요.' : '메시지를 입력하세요...'}
       />
     </div>
     </div>
