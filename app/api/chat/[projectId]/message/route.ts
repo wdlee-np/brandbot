@@ -1,12 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyToken, hashToken } from '@/lib/token';
 import { createAdminClient } from '@/lib/supabase/admin';
-import { getOrCreateCache, getModelWithCache, buildSystemPrompt } from '@/services/gemini/cache';
+import { buildSystemPrompt, generateWithContext } from '@/services/gemini/cache';
 import { DEFAULT_MODEL } from '@/services/gemini/client';
 import { checkRateLimit } from '@/services/rateLimit';
 import type { ChatMessage, ChatApiResponse, Project } from '@/types';
 
-const MAX_HISTORY_TURNS = 20; // 최대 20턴 (토큰 과다 사용 방지)
+const MAX_HISTORY_TURNS = 20;
 
 // [QUIZ_STEP:N] 마커 추출
 function extractQuizStep(text: string): { cleanText: string; quizStep: number | null } {
@@ -96,30 +96,10 @@ export async function POST(
     currentQuiz = quiz;
   }
 
-  // Context Cache 조회/생성
-  let cacheId: string;
-  try {
-    cacheId = await getOrCreateCache(project as Project);
-  } catch (err) {
-    console.error('[chat/message] Cache 오류:', err);
-    return NextResponse.json({ error: '서비스 초기화 중 오류가 발생했습니다.' }, { status: 500 });
-  }
-
-  // 시스템 프롬프트 (퀴즈 단계 정보 포함)
-  const systemPromptWithQuiz = buildSystemPrompt(
-    project as Project,
-    nextStep <= 3 ? nextStep : 3,
-    currentQuiz?.question ?? ''
-  );
-
   // 대화 히스토리 제한 (최대 20턴)
   const limitedHistory = conversationHistory.slice(-MAX_HISTORY_TURNS);
 
-  // Gemini API 호출 (Context Cache 사용)
-  const model = await getModelWithCache(cacheId, project.gemini_model ?? DEFAULT_MODEL);
-
-  // 캐시 모델은 systemInstruction을 캐시에 포함하므로 별도 전달 불필요
-  // 단, 퀴즈 단계가 변할 수 있어 런타임 프롬프트로 추가 컨텍스트 제공
+  // 퀴즈 단계 컨텍스트를 마지막 user 메시지에 포함
   const contents = [
     ...limitedHistory.map((msg) => ({
       role: msg.role as 'user' | 'model',
@@ -135,14 +115,14 @@ export async function POST(
     },
   ];
 
+  // BUG-03 수정: generateWithContext — 캐시 시도 후 인라인 폴백 내장
   try {
-    const rawText = await model.generateContent({
-      contents,
-      generationConfig: {
-        temperature: 0.7,
-        maxOutputTokens: 1024,
-      },
-    });
+    const rawText = await generateWithContext(
+      project as Project,
+      { contents, generationConfig: { temperature: 0.7, maxOutputTokens: 1024 } },
+      project.gemini_model ?? DEFAULT_MODEL
+    );
+
     const { cleanText, quizStep } = extractQuizStep(rawText);
 
     const response: ChatApiResponse = {
