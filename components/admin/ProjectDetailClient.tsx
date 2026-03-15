@@ -16,6 +16,7 @@ import {
 } from '@/components/ui/select';
 import QuizEditor from '@/components/admin/QuizEditor';
 import { GEMINI_MODEL_OPTIONS, type GeminiModel, type Project, type Quiz } from '@/types';
+import { Link2, Copy, Check } from 'lucide-react';
 
 const STATUS_LABEL: Record<Project['status'], string> = {
   draft: '초안', uploading: '업로드 중', processing: '처리 중',
@@ -41,6 +42,9 @@ export default function ProjectDetailClient({ project: initial, quizzes: initial
     initial.gemini_model ?? 'gemini-3.1-flash-lite-preview'
   );
   const [savingModel, setSavingModel] = useState(false);
+  const [issuedLink, setIssuedLink] = useState<string | null>(null);
+  const [issuingLink, setIssuingLink] = useState(false);
+  const [linkCopied, setLinkCopied] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleFileUpload = async (file: File) => {
@@ -116,6 +120,31 @@ export default function ProjectDetailClient({ project: initial, quizzes: initial
     const { project: updated } = await res.json();
     setProject(updated);
     toast.success('AI 모델이 변경되었습니다.');
+  };
+
+  const handleIssueLink = async () => {
+    setIssuingLink(true);
+    const userId = crypto.randomUUID();
+    const res = await fetch('/api/admin/issue-token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId, projectId: project.id }),
+    });
+    setIssuingLink(false);
+    if (!res.ok) {
+      const err = await res.json();
+      toast.error(err.error ?? '링크 발급에 실패했습니다.');
+      return;
+    }
+    const { chatUrl } = await res.json();
+    setIssuedLink(chatUrl);
+  };
+
+  const handleCopyLink = async () => {
+    if (!issuedLink) return;
+    await navigator.clipboard.writeText(issuedLink);
+    setLinkCopied(true);
+    setTimeout(() => setLinkCopied(false), 2000);
   };
 
   const handleDelete = async () => {
@@ -194,6 +223,46 @@ export default function ProjectDetailClient({ project: initial, quizzes: initial
       </div>
 
       <Separator />
+
+      {/* 채팅 링크 발급 — active 상태에서만 표시 */}
+      {project.status === 'active' && (
+        <>
+          <div className="space-y-3">
+            <h2 className="text-sm font-medium text-muted-foreground uppercase tracking-wide">채팅 링크 발급</h2>
+            <p className="text-xs text-muted-foreground">
+              사용자별 1회용 채팅 링크를 생성합니다. 발급된 링크는 24시간 유효합니다.
+            </p>
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-2"
+              onClick={handleIssueLink}
+              disabled={issuingLink}
+            >
+              <Link2 className="h-4 w-4" />
+              {issuingLink ? '발급 중...' : '새 링크 발급'}
+            </Button>
+            {issuedLink && (
+              <div className="flex items-center gap-2 rounded-lg border bg-muted px-3 py-2">
+                <code className="flex-1 text-xs break-all">{issuedLink}</code>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7 flex-shrink-0"
+                  onClick={handleCopyLink}
+                >
+                  {linkCopied ? (
+                    <Check className="h-3.5 w-3.5 text-green-500" />
+                  ) : (
+                    <Copy className="h-3.5 w-3.5" />
+                  )}
+                </Button>
+              </div>
+            )}
+          </div>
+          <Separator />
+        </>
+      )}
 
       {/* 파일 업로드 */}
       <div className="space-y-3">
