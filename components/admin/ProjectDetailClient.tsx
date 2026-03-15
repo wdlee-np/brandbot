@@ -76,8 +76,9 @@ export default function ProjectDetailClient({ project: initial, quizzes: initial
       return;
     }
 
+    const { path } = await res.json();
     toast.success('파일이 업로드되었습니다.');
-    setProject((p) => ({ ...p, status: 'ready' }));
+    setProject((p) => ({ ...p, status: 'ready', brand_info_path: path }));
     router.refresh();
   };
 
