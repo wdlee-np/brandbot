@@ -40,9 +40,39 @@ function QuizProgress({ current, total = 3 }: { current: number; total?: number 
   );
 }
 
+// BUG-07-02: DB 원본 퀴즈 문제를 공식 카드로 표시
+function OfficialQuizCard({ step, question }: { step: number; question: string }) {
+  return (
+    <div className="mx-4 rounded-2xl border-2 border-amber-400 bg-amber-50 dark:bg-amber-950 dark:border-amber-600 p-4 space-y-2">
+      <div className="flex items-center gap-2">
+        <span className="text-base">🎯</span>
+        <span className="text-xs font-bold text-amber-700 dark:text-amber-300 uppercase tracking-wide">
+          퀴즈 {step}단계
+        </span>
+      </div>
+      <p className="text-sm font-medium text-amber-900 dark:text-amber-100 leading-relaxed">
+        {question}
+      </p>
+      <p className="text-xs text-amber-600 dark:text-amber-400">
+        아래 입력창에 답을 입력하세요.
+      </p>
+    </div>
+  );
+}
+
 export default function ChatWindow({ projectId, token, brandName, initialQuizProgress, onQuizComplete }: Props) {
   const router = useRouter();
-  const { messages, isLoading, isQuizMode, quizProgress, error, errorCode, sendMessage } = useChat({
+  const {
+    messages,
+    isLoading,
+    isQuizMode,
+    currentQuizStep,
+    currentQuizQuestion,
+    quizProgress,
+    error,
+    errorCode,
+    sendMessage,
+  } = useChat({
     projectId,
     token,
     initialQuizProgress, // BUG-02-04
@@ -77,7 +107,7 @@ export default function ChatWindow({ projectId, token, brandName, initialQuizPro
   // 메시지 추가 시 하단 스크롤
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
+  }, [messages, isQuizMode]);
 
   // 퀴즈 3단계 완료 감지
   useEffect(() => {
@@ -130,6 +160,10 @@ export default function ChatWindow({ projectId, token, brandName, initialQuizPro
             isStreaming={streamingIndex === i}
           />
         ))}
+        {/* BUG-07-02: 퀴즈 모드 활성화 시 DB 원본 문제를 공식 카드로 별도 표시 */}
+        {isQuizMode && currentQuizStep !== null && currentQuizQuestion && (
+          <OfficialQuizCard step={currentQuizStep} question={currentQuizQuestion} />
+        )}
         {isLoading && (
           <div className="flex items-center gap-2.5 px-4">
             <div className="w-8 h-8 rounded-full bg-muted flex items-center justify-center text-sm">

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
 import type { ChatMessage, ChatApiResponse } from '@/types';
 
 interface UseChatOptions {
@@ -20,11 +20,77 @@ interface ChatState {
   errorCode: number | null;
 }
 
+// 로컬 스토리지 키 생성 (토큰 마지막 10자로 사용자 구분)
+function storageKey(type: string, projectId: string, token: string): string {
+  return `bb_${type}_${projectId}_${token.slice(-10)}`;
+}
+
+const MAX_HISTORY_MESSAGES = 40; // 20턴 (user + model 각 1개씩)
+
+function loadHistory(projectId: string, token: string): ChatMessage[] {
+  try {
+    const raw = localStorage.getItem(storageKey('history', projectId, token));
+    if (!raw) return [];
+    return JSON.parse(raw) as ChatMessage[];
+  } catch {
+    return [];
+  }
+}
+
+function saveHistory(history: ChatMessage[], projectId: string, token: string): void {
+  try {
+    const capped = history.slice(-MAX_HISTORY_MESSAGES);
+    localStorage.setItem(storageKey('history', projectId, token), JSON.stringify(capped));
+  } catch { /* 스토리지 용량 초과 등 무시 */ }
+}
+
+function loadAskedQuizSteps(projectId: string, token: string): number[] {
+  try {
+    const raw = localStorage.getItem(storageKey('quiz_asked', projectId, token));
+    return raw ? (JSON.parse(raw) as number[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveAskedQuizSteps(steps: number[], projectId: string, token: string): void {
+  try {
+    localStorage.setItem(storageKey('quiz_asked', projectId, token), JSON.stringify(steps));
+  } catch { /* 무시 */ }
+}
+
+// BUG-07-03: 퀴즈 완료 단계 로컬 스토리지 저장/로드
+function loadCompletedSteps(projectId: string, token: string): number[] {
+  try {
+    const raw = localStorage.getItem(storageKey('quiz_done', projectId, token));
+    return raw ? (JSON.parse(raw) as number[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveCompletedStep(step: number, projectId: string, token: string): number[] {
+  const steps = loadCompletedSteps(projectId, token);
+  if (!steps.includes(step)) steps.push(step);
+  try {
+    localStorage.setItem(storageKey('quiz_done', projectId, token), JSON.stringify(steps));
+  } catch { /* 무시 */ }
+  return steps;
+}
+
 export function useChat({ projectId, token, initialQuizProgress = 0 }: UseChatOptions) {
+  // BUG-07-01: localStorage에서 대화 이력 복원
+  const savedHistory = typeof window !== 'undefined' ? loadHistory(projectId, token) : [];
+  // BUG-07-03: localStorage에서 완료된 퀴즈 단계 복원
+  const savedCompletedSteps = typeof window !== 'undefined' ? loadCompletedSteps(projectId, token) : [];
+  // 서버값과 localStorage 값 중 큰 값 사용
+  const localProgress = savedCompletedSteps.length;
+  const effectiveProgress = Math.max(initialQuizProgress, localProgress);
+
   const [state, setState] = useState<ChatState>({
     messages: [],
     isLoading: false,
-    quizProgress: initialQuizProgress, // BUG-02-04: 0 고정 → DB 값으로 초기화
+    quizProgress: effectiveProgress,
     currentQuizStep: null,
     currentQuizQuestion: null,
     isQuizMode: false,
@@ -32,8 +98,20 @@ export function useChat({ projectId, token, initialQuizProgress = 0 }: UseChatOp
     errorCode: null,
   });
 
-  // 히스토리 ref (sessionStorage와 동기화)
-  const historyRef = useRef<ChatMessage[]>([]);
+  // 히스토리 ref — BUG-07-01: localStorage에서 초기값 복원
+  const historyRef = useRef<ChatMessage[]>(savedHistory);
+  // 이미 출제한 퀴즈 단계 ref — BUG-07-01: 퀴즈 반복 방지
+  const askedQuizStepsRef = useRef<number[]>(
+    typeof window !== 'undefined' ? loadAskedQuizSteps(projectId, token) : []
+  );
+
+  // BUG-07-01: localStorage 히스토리를 화면 메시지로 복원
+  useEffect(() => {
+    if (savedHistory.length > 0) {
+      setState((prev) => ({ ...prev, messages: savedHistory }));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const sendMessage = useCallback(
     async (userMessage: string) => {
@@ -58,6 +136,8 @@ export function useChat({ projectId, token, initialQuizProgress = 0 }: UseChatOp
       }));
 
       historyRef.current = [...historyRef.current, userMsg];
+      // BUG-07-01: 히스토리 즉시 저장
+      saveHistory(historyRef.current, projectId, token);
 
       try {
         const res = await fetch(`/api/chat/${projectId}/message`, {
@@ -67,6 +147,7 @@ export function useChat({ projectId, token, initialQuizProgress = 0 }: UseChatOp
             token,
             message: userMessage.trim(),
             conversationHistory: historyRef.current.slice(0, -1), // 현재 메시지 제외한 이전 히스토리
+            askedQuizSteps: askedQuizStepsRef.current, // BUG-07-01: 이미 출제된 퀴즈 단계
           }),
         });
 
@@ -102,6 +183,16 @@ export function useChat({ projectId, token, initialQuizProgress = 0 }: UseChatOp
         };
 
         historyRef.current = [...historyRef.current, botMsg];
+        // BUG-07-01: 봇 응답 후 히스토리 저장
+        saveHistory(historyRef.current, projectId, token);
+
+        // BUG-07-01: 퀴즈 출제 감지 시 askedQuizSteps에 추가
+        if (data.quizStep !== null && data.quizStep !== undefined) {
+          if (!askedQuizStepsRef.current.includes(data.quizStep)) {
+            askedQuizStepsRef.current = [...askedQuizStepsRef.current, data.quizStep];
+            saveAskedQuizSteps(askedQuizStepsRef.current, projectId, token);
+          }
+        }
 
         setState((prev) => ({
           ...prev,
@@ -125,6 +216,8 @@ export function useChat({ projectId, token, initialQuizProgress = 0 }: UseChatOp
               const quizData: { correct: boolean; quizProgress: number; allCompleted: boolean } =
                 await quizRes.json();
               if (quizData.correct) {
+                // BUG-07-03: 정답 시 localStorage에 완료 단계 저장
+                saveCompletedStep(capturedQuizStep, projectId, token);
                 setState((prev) => ({ ...prev, quizProgress: quizData.quizProgress }));
               }
             }
@@ -168,6 +261,8 @@ export function useChat({ projectId, token, initialQuizProgress = 0 }: UseChatOp
       const data: { correct: boolean; quizProgress: number; message: string; allCompleted: boolean } = await res.json();
 
       if (data.correct) {
+        // BUG-07-03: 정답 시 localStorage에 완료 단계 저장
+        saveCompletedStep(step, projectId, token);
         setState((prev) => ({ ...prev, quizProgress: data.quizProgress }));
       }
 

@@ -23,14 +23,14 @@ export async function POST(
 ) {
   const { projectId } = await params;
 
-  let body: { token: string; message: string; conversationHistory?: ChatMessage[] };
+  let body: { token: string; message: string; conversationHistory?: ChatMessage[]; askedQuizSteps?: number[] };
   try {
     body = await request.json();
   } catch {
     return NextResponse.json({ error: '잘못된 요청 형식입니다.' }, { status: 400 });
   }
 
-  const { token, message, conversationHistory = [] } = body;
+  const { token, message, conversationHistory = [], askedQuizSteps = [] } = body;
   if (!token || !message) {
     return NextResponse.json({ error: 'token과 message는 필수입니다.' }, { status: 400 });
   }
@@ -99,6 +99,13 @@ export async function POST(
   // 대화 히스토리 제한 (최대 20턴)
   const limitedHistory = conversationHistory.slice(-MAX_HISTORY_TURNS);
 
+  // BUG-07-01: 이미 출제된 단계는 퀴즈 문제를 context에서 제외 (반복 출제 방지)
+  const quizAlreadyAsked = nextStep <= 3 && askedQuizSteps.includes(nextStep);
+  const quizContextSuffix =
+    nextStep <= 3 && currentQuiz && !quizAlreadyAsked
+      ? `, 퀴즈 문제: ${currentQuiz.question}`
+      : '';
+
   // 퀴즈 단계 컨텍스트를 마지막 user 메시지에 포함
   const contents = [
     ...limitedHistory.map((msg) => ({
@@ -109,7 +116,7 @@ export async function POST(
       role: 'user' as const,
       parts: [
         {
-          text: `[현재 퀴즈 단계: ${nextStep <= 3 ? nextStep : '완료'} / 3${currentQuiz ? `, 퀴즈 문제: ${currentQuiz.question}` : ''}]\n\n${message}`,
+          text: `[현재 퀴즈 단계: ${nextStep <= 3 ? nextStep : '완료'} / 3${quizContextSuffix}]\n\n${message}`,
         },
       ],
     },
