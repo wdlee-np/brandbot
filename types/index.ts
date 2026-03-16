@@ -4,6 +4,7 @@
 
 export type GeminiModel =
   | 'gemini-1.5-flash-8b'
+  | 'gemini-1.5-flash-lite-preview'
   | 'gemini-1.5-flash'
   | 'gemini-3.1-flash-lite-preview'
   | 'gemini-3.1-flash-preview'
@@ -11,6 +12,7 @@ export type GeminiModel =
 
 export const GEMINI_MODEL_OPTIONS: { value: GeminiModel; label: string }[] = [
   { value: 'gemini-1.5-flash-8b',           label: 'Gemini 1.5 Flash-8B (최저 비용)' },
+  { value: 'gemini-1.5-flash-lite-preview',  label: 'Gemini 1.5 Flash Lite Preview' },
   { value: 'gemini-1.5-flash',              label: 'Gemini 1.5 Flash (저비용 안정)' },
   { value: 'gemini-3.1-flash-lite-preview', label: 'Gemini 3.1 Flash Lite Preview (가성비)' },
   { value: 'gemini-3.1-flash-preview',      label: 'Gemini 3.1 Flash Preview (표준)' },
