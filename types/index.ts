@@ -3,14 +3,18 @@
 // ============================
 
 export type GeminiModel =
+  | 'gemini-1.5-flash-8b'
+  | 'gemini-1.5-flash'
   | 'gemini-3.1-flash-lite-preview'
   | 'gemini-3.1-flash-preview'
   | 'gemini-3.1-pro-preview';
 
 export const GEMINI_MODEL_OPTIONS: { value: GeminiModel; label: string }[] = [
-  { value: 'gemini-3.1-flash-lite-preview', label: 'gemini-3.1-flash-lite-preview (최고 가성비)' },
-  { value: 'gemini-3.1-flash-preview', label: 'gemini-3.1-flash-preview (표준 성능)' },
-  { value: 'gemini-3.1-pro-preview', label: 'gemini-3.1-pro-preview (고성능 추론)' },
+  { value: 'gemini-1.5-flash-8b',           label: 'Gemini 1.5 Flash-8B (최저 비용)' },
+  { value: 'gemini-1.5-flash',              label: 'Gemini 1.5 Flash (저비용 안정)' },
+  { value: 'gemini-3.1-flash-lite-preview', label: 'Gemini 3.1 Flash Lite Preview (가성비)' },
+  { value: 'gemini-3.1-flash-preview',      label: 'Gemini 3.1 Flash Preview (표준)' },
+  { value: 'gemini-3.1-pro-preview',        label: 'Gemini 3.1 Pro Preview (고성능)' },
 ];
 
 /** 브랜드 프로젝트 */
