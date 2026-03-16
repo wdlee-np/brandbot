@@ -88,6 +88,8 @@ export async function PATCH(
         { status: 400 }
       );
     }
+    // BUG-11-02: 재활성화 시 캐시 초기화 — 최신 브랜드 정보/퀴즈 반영
+    body.context_cache_id = null;
   }
 
   // active 프로젝트에서 brand_info_path 변경 방지 (DB 트리거와 이중 방어)
@@ -99,7 +101,7 @@ export async function PATCH(
   }
 
   // 허용 필드만 추출 (brand_info_path는 upload API 전용)
-  const allowedFields = ['project_name', 'brand_name', 'persona_config', 'coupon_name', 'coupon_url', 'status', 'gemini_model'];
+  const allowedFields = ['project_name', 'brand_name', 'persona_config', 'coupon_name', 'coupon_url', 'status', 'gemini_model', 'context_cache_id'];
   const updateData: Record<string, unknown> = {};
   for (const key of allowedFields) {
     if (body[key] !== undefined) updateData[key] = body[key];

@@ -6,14 +6,20 @@ import ChatMessage from './ChatMessage';
 import ChatInput from './ChatInput';
 import { useChat } from '@/hooks/useChat';
 import { Button } from '@/components/ui/button';
-import { RefreshCw } from 'lucide-react';
+import { RefreshCw, ExternalLink } from 'lucide-react';
 
 interface Props {
   projectId: string;
   token: string;
   brandName: string;
   initialQuizProgress?: number; // BUG-02-04
-  onQuizComplete?: () => void;
+}
+
+interface CouponData {
+  couponName: string;
+  couponUrl: string | null;
+  issuedAt: string;
+  alreadyIssued: boolean;
 }
 
 // 상단 퀴즈 진행 표시 (BUG-10-04: total을 동적으로)
@@ -41,7 +47,7 @@ function QuizProgress({ current, total = 3 }: { current: number; total?: number 
 }
 
 
-export default function ChatWindow({ projectId, token, brandName, initialQuizProgress, onQuizComplete }: Props) {
+export default function ChatWindow({ projectId, token, brandName, initialQuizProgress }: Props) {
   const router = useRouter();
   const {
     messages,
@@ -56,6 +62,10 @@ export default function ChatWindow({ projectId, token, brandName, initialQuizPro
     token,
     initialQuizProgress, // BUG-02-04
   });
+
+  // BUG-11-03: 쿠폰 상태
+  const [coupon, setCoupon] = useState<CouponData | null>(null);
+  const couponFetchedRef = useRef(false);
 
   // 마지막 봇 메시지 인덱스 — 타이핑 애니메이션 대상
   const [streamingIndex, setStreamingIndex] = useState<number | null>(null);
@@ -88,12 +98,20 @@ export default function ChatWindow({ projectId, token, brandName, initialQuizPro
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, isQuizMode]);
 
-  // 퀴즈 완료 감지 (BUG-10-04: 동적 quizTotal 기준)
+  // BUG-11-03: 퀴즈 완료 감지 → 쿠폰 API 호출 후 채팅창 내 표시
   useEffect(() => {
-    if (quizTotal > 0 && quizProgress >= quizTotal) {
-      onQuizComplete?.();
+    if (quizTotal > 0 && quizProgress >= quizTotal && !couponFetchedRef.current) {
+      couponFetchedRef.current = true;
+      fetch(`/api/chat/${projectId}/coupon`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token }),
+      })
+        .then((res) => res.json())
+        .then((data: CouponData) => setCoupon(data))
+        .catch(() => { /* 네트워크 오류 시 무시 — 재시도 없음 */ });
     }
-  }, [quizProgress, quizTotal, onQuizComplete]);
+  }, [quizProgress, quizTotal, projectId, token]);
 
   // 401 — 토큰 만료 시 차단 페이지로 이동
   useEffect(() => {
@@ -164,6 +182,37 @@ export default function ChatWindow({ projectId, token, brandName, initialQuizPro
               <RefreshCw className="h-3 w-3" />
               연결 오류 — 페이지 새로고침
             </Button>
+          </div>
+        )}
+        {/* BUG-11-03: 퀴즈 완료 후 쿠폰 카드 (채팅창 내 표시) */}
+        {quizTotal > 0 && quizProgress >= quizTotal && (
+          <div className="flex items-start gap-2.5 px-4">
+            <div className="flex-shrink-0 w-8 h-8 rounded-full bg-muted flex items-center justify-center text-sm">
+              🤖
+            </div>
+            <div className="max-w-[75%] rounded-2xl rounded-tl-sm bg-green-50 border border-green-200 dark:bg-green-950 dark:border-green-800 px-4 py-3 text-sm space-y-2">
+              <p className="font-medium text-green-800 dark:text-green-200">🎉 퀴즈를 모두 통과하셨습니다!</p>
+              {coupon ? (
+                <>
+                  <p className="text-green-700 dark:text-green-300 text-xs">
+                    {coupon.alreadyIssued ? '이전에 발급된 쿠폰입니다.' : '쿠폰이 발급되었습니다.'}
+                  </p>
+                  <p className="font-semibold text-green-900 dark:text-green-100">{coupon.couponName}</p>
+                  {coupon.couponUrl && (
+                    <a
+                      href={coupon.couponUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1 text-xs text-green-700 dark:text-green-300 underline underline-offset-2 hover:text-green-900"
+                    >
+                      쿠폰 사용하기 <ExternalLink className="h-3 w-3" />
+                    </a>
+                  )}
+                </>
+              ) : (
+                <p className="text-green-600 dark:text-green-400 text-xs animate-pulse">쿠폰을 준비 중입니다...</p>
+              )}
+            </div>
           </div>
         )}
         <div ref={messagesEndRef} />

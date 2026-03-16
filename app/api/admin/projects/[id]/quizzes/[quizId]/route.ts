@@ -11,48 +11,33 @@ async function requireAdmin() {
   return profile ? user : null;
 }
 
-// BUG-10-05: step 변경 시 충돌 단계를 뒤로 밀기
+// BUG-11-01: step 변경 시 충돌 퀴즈와 교체(swap) — 밀기 대신 스왑
 // 임시 step(99)을 활용해 UNIQUE(project_id, step) 제약 회피
-async function shiftQuizSteps(
+async function swapOrMoveQuizStep(
   supabase: ReturnType<typeof createAdminClient>,
   projectId: string,
   targetId: string,
   oldStep: number,
   newStep: number
 ): Promise<void> {
-  // 1. 대상 퀴즈를 임시 step으로 이동 (UNIQUE 충돌 방지)
-  await supabase.from('quizzes').update({ step: 99 }).eq('id', targetId);
+  // 목표 step에 충돌하는 퀴즈 조회
+  const { data: conflicting } = await supabase
+    .from('quizzes')
+    .select('id')
+    .eq('project_id', projectId)
+    .eq('step', newStep)
+    .neq('id', targetId)
+    .maybeSingle();
 
-  if (newStep < oldStep) {
-    // 앞으로 이동: [newStep, oldStep-1] 범위 퀴즈 step+1 (내림차순 처리)
-    const { data: affected } = await supabase
-      .from('quizzes')
-      .select('id, step')
-      .eq('project_id', projectId)
-      .gte('step', newStep)
-      .lt('step', oldStep)
-      .order('step', { ascending: false });
-
-    for (const q of (affected ?? [])) {
-      await supabase.from('quizzes').update({ step: q.step + 1 }).eq('id', q.id);
-    }
+  if (conflicting) {
+    // 스왑: target → 99(임시) → conflict를 oldStep으로 → target을 newStep으로
+    await supabase.from('quizzes').update({ step: 99 }).eq('id', targetId);
+    await supabase.from('quizzes').update({ step: oldStep }).eq('id', conflicting.id);
+    await supabase.from('quizzes').update({ step: newStep }).eq('id', targetId);
   } else {
-    // 뒤로 이동: [oldStep+1, newStep] 범위 퀴즈 step-1 (오름차순 처리)
-    const { data: affected } = await supabase
-      .from('quizzes')
-      .select('id, step')
-      .eq('project_id', projectId)
-      .gt('step', oldStep)
-      .lte('step', newStep)
-      .order('step', { ascending: true });
-
-    for (const q of (affected ?? [])) {
-      await supabase.from('quizzes').update({ step: q.step - 1 }).eq('id', q.id);
-    }
+    // 충돌 없음: 직접 이동
+    await supabase.from('quizzes').update({ step: newStep }).eq('id', targetId);
   }
-
-  // 2. 대상 퀴즈를 최종 step으로 이동
-  await supabase.from('quizzes').update({ step: newStep }).eq('id', targetId);
 }
 
 // PATCH /api/admin/projects/[id]/quizzes/[quizId]
@@ -89,9 +74,9 @@ export async function PATCH(
 
   if (!currentQuiz) return NextResponse.json({ error: '퀴즈를 찾을 수 없습니다.' }, { status: 404 });
 
-  // BUG-10-05: step 변경 시 충돌 단계 처리
+  // BUG-11-01: step 변경 시 충돌 퀴즈와 스왑
   if (body.step !== undefined && body.step !== currentQuiz.step) {
-    await shiftQuizSteps(supabase, id, quizId, currentQuiz.step, body.step);
+    await swapOrMoveQuizStep(supabase, id, quizId, currentQuiz.step, body.step);
   }
 
   // question/answer 업데이트 (step은 shiftQuizSteps에서 처리됨)
