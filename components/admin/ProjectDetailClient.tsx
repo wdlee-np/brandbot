@@ -62,24 +62,29 @@ export default function ProjectDetailClient({ project: initial, quizzes: initial
     const formData = new FormData();
     formData.append('file', file);
 
-    const res = await fetch(`/api/admin/projects/${project.id}/upload`, {
-      method: 'POST',
-      body: formData,
-    });
+    try {
+      const res = await fetch(`/api/admin/projects/${project.id}/upload`, {
+        method: 'POST',
+        body: formData,
+      });
 
-    setUploading(false);
-    setUploadProgress(null);
+      if (!res.ok) {
+        const err = await res.json();
+        toast.error(err.error ?? '업로드에 실패했습니다.');
+        return;
+      }
 
-    if (!res.ok) {
-      const err = await res.json();
-      toast.error(err.error ?? '업로드에 실패했습니다.');
-      return;
+      const { path } = await res.json();
+      toast.success('파일이 업로드되었습니다.');
+      setProject((p) => ({ ...p, status: 'ready', brand_info_path: path }));
+      router.refresh();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : '네트워크 오류가 발생했습니다.';
+      toast.error(`업로드 실패: ${message}`);
+    } finally {
+      setUploading(false);
+      setUploadProgress(null);
     }
-
-    const { path } = await res.json();
-    toast.success('파일이 업로드되었습니다.');
-    setProject((p) => ({ ...p, status: 'ready', brand_info_path: path }));
-    router.refresh();
   };
 
   const handleDrop = (e: React.DragEvent) => {
